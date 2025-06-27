@@ -1,3 +1,7 @@
+![FluxCache Architecture](cache.png)
+
+*Figure: FluxCache distributed cache architecture and request flow.*
+
 # FluxCache
 
 A high-performance, high-availability distributed in-memory cache system written in Go. Inspired by Redis, designed for modern cloud-native environments.
