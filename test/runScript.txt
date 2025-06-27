@@ -1,0 +1,3 @@
+// runs in linux
+
+wrk -t4 -c100 -d30s -s set.lua http://localhost:8081
