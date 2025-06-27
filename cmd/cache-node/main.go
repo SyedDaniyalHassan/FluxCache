@@ -15,10 +15,11 @@ import (
 	"github.com/SyedDaniyalHassan/fluxcache/pkg/monitoring"
 )
 
-// CacheItem represents a value in the cache with optional TTL
+// CacheItem represents a value in the cache with optional TTL and versioning
 type CacheItem struct {
-	Value      interface{} `json:"value"`
-	Expiration int64       `json:"expiration"` // Unix timestamp, 0 means no expiration
+	Value       interface{} `json:"value"`
+	Expiration  int64       `json:"expiration"`   // Unix timestamp, 0 means no expiration
+	LastUpdated int64       `json:"last_updated"` // Unix timestamp (ms) of last update
 }
 
 // Cache is a thread-safe in-memory cache
@@ -37,13 +38,26 @@ func NewCache() *Cache {
 	return &Cache{}
 }
 
-func (c *Cache) Set(key string, value interface{}, ttlSeconds int64) {
+func (c *Cache) Set(key string, value interface{}, ttlSeconds int64, lastUpdated int64) bool {
 	exp := int64(0)
 	if ttlSeconds > 0 {
 		exp = time.Now().Add(time.Duration(ttlSeconds) * time.Second).Unix()
 	}
-	item := CacheItem{Value: value, Expiration: exp}
-	c.store.Store(key, item)
+	item := CacheItem{Value: value, Expiration: exp, LastUpdated: lastUpdated}
+	for {
+		v, loaded := c.store.Load(key)
+		if !loaded {
+			c.store.Store(key, item)
+			return true
+		}
+		existing := v.(CacheItem)
+		if lastUpdated >= existing.LastUpdated {
+			c.store.Store(key, item)
+			return true
+		}
+		// If incoming is older, do not update
+		return false
+	}
 }
 
 func (c *Cache) Get(key string) (interface{}, bool) {
@@ -77,9 +91,10 @@ func forwardRequest(node *cluster.Node, path string, method string, body []byte)
 func handleSet(cache *Cache) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		var req struct {
-			Key   string      `json:"key"`
-			Value interface{} `json:"value"`
-			TTL   int64       `json:"ttl"`
+			Key         string      `json:"key"`
+			Value       interface{} `json:"value"`
+			TTL         int64       `json:"ttl"`
+			LastUpdated int64       `json:"last_updated"`
 		}
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 			http.Error(w, "invalid request", http.StatusBadRequest)
@@ -88,6 +103,9 @@ func handleSet(cache *Cache) http.HandlerFunc {
 		if req.Key == "" {
 			http.Error(w, "key required", http.StatusBadRequest)
 			return
+		}
+		if req.LastUpdated == 0 {
+			req.LastUpdated = time.Now().UnixNano() / int64(time.Millisecond)
 		}
 		replicas := clust.GetResponsibleNodes(req.Key, replicaCount)
 		isReplica := false
@@ -115,7 +133,12 @@ func handleSet(cache *Cache) http.HandlerFunc {
 			log.Printf("[SET] Node: %s, Key: %s, Replicas: %v, IsReplica: %v", selfID, req.Key, nodeIDs(replicas), isReplica)
 			return
 		}
-		cache.Set(req.Key, req.Value, req.TTL)
+		updated := cache.Set(req.Key, req.Value, req.TTL, req.LastUpdated)
+		if !updated {
+			w.WriteHeader(http.StatusConflict)
+			w.Write([]byte("conflict: incoming update is older than current value"))
+			return
+		}
 		w.WriteHeader(http.StatusNoContent)
 		log.Printf("[SET] Node: %s, Key: %s, Replicas: %v, IsReplica: %v", selfID, req.Key, nodeIDs(replicas), isReplica)
 	}
@@ -144,6 +167,9 @@ func handleGet(cache *Cache) http.HandlerFunc {
 				value, ok := cache.Get(key)
 				if ok {
 					resp := map[string]interface{}{"key": key, "value": value}
+					if item, ok := cache.store.Load(key); ok {
+						resp["last_updated"] = item.(CacheItem).LastUpdated
+					}
 					w.Header().Set("Content-Type", "application/json")
 					json.NewEncoder(w).Encode(resp)
 					return

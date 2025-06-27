@@ -3,7 +3,6 @@ package cluster
 import (
 	"crypto/sha1"
 	"fmt"
-	"log"
 	"net/http"
 	"sort"
 	"sync"
@@ -91,7 +90,6 @@ func (n *NodeHealthTracker) IsNodeHealthy(nodeID string) bool {
 	n.mu.RLock()
 	defer n.mu.RUnlock()
 	healthy, ok := n.status[nodeID]
-	log.Printf("[HEALTH] Query for %s: ok=%v, healthy=%v, map=%v", nodeID, ok, healthy, n.status)
 	return ok && healthy
 }
 
@@ -115,7 +113,7 @@ func (c *Cluster) StartHealthMonitor(selfID string, interval time.Duration) {
 					continue
 				}
 				url := "http://" + node.Addr + "/heartbeat"
-				client := &http.Client{Timeout: 1 * time.Second}
+				client := &http.Client{Timeout: 0}
 				resp, err := client.Get(url)
 				if err == nil && resp.StatusCode == 200 {
 					c.Health.MarkNodeHealth(id, true)
