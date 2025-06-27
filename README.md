@@ -59,7 +59,7 @@ docker-compose -f Docker/docker-compose.yml up --build
 | **Consul**     | 1,000–8,000 | 2–10ms      | HTTP/gRPC  | Yes                   | Service discovery, Go        |
 | **Hazelcast**  | 5,000–20,000| 1–5ms       | TCP/Binary | Yes                   | Java, distributed, in-memory |
 | **Couchbase**  | 5,000–20,000| 2–10ms      | HTTP/Binary| Yes                   | Distributed, persistent      |
-| **FluxCache**  | **1,373**   | **6.6ms**   | HTTP/JSON  | **Yes**               | Go, 2x replication, HA       |
+| **FluxCache**  | **1,373**   | **3-7ms**   | HTTP/JSON  | **Yes**               | Go, 2x replication, HA       |
 
 > **Note:** FluxCache supports 2x data replication and automatic failover, ensuring high availability and resilience.
 - Prometheus + Grafana can be used for advanced dashboards
