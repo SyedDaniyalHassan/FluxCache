@@ -1,0 +1,44 @@
+version: '3.8'
+services:
+  node1:
+    image: golang:1.22-alpine
+    working_dir: /app
+    volumes:
+      - ../:/app
+    command: go run ./cmd/cache-node
+    environment:
+      - PORT=8081
+      - NODE_ID=node1:8081
+      - NODES=node1:8081,node2:8082,node3:8083
+    ports:
+      - "8081:8081"
+  node2:
+    image: golang:1.22-alpine
+    working_dir: /app
+    volumes:
+      - ../:/app
+    command: go run ./cmd/cache-node
+    environment:
+      - PORT=8082
+      - NODE_ID=node2:8082
+      - NODES=node1:8081,node2:8082,node3:8083
+    ports:
+      - "8082:8082"
+  node3:
+    image: golang:1.22-alpine
+    working_dir: /app
+    volumes:
+      - ../:/app
+    command: go run ./cmd/cache-node
+    environment:
+      - PORT=8083
+      - NODE_ID=node3:8083
+      - NODES=node1:8081,node2:8082,node3:8083
+    ports:
+      - "8083:8083"
+  prometheus:
+    image: prom/prometheus
+    volumes:
+      - ./prometheus.yml:/etc/prometheus/prometheus.yml
+    ports:
+      - "9090:9090" 

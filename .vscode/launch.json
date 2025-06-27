@@ -1,0 +1,29 @@
+{
+    "version": "0.2.0",
+    "configurations": [
+      {
+        "name": "Debug Node 1",
+        "type": "go",
+        "request": "launch",
+        "mode": "auto",
+        "program": "${workspaceFolder}/cmd/cache-node",
+        "env": {
+          "PORT": "8081",
+          "NODE_ID": "localhost:8081",
+          "NODES": "localhost:8081,localhost:8082"
+        }
+      },
+      {
+        "name": "Debug Node 2",
+        "type": "go",
+        "request": "launch",
+        "mode": "auto",
+        "program": "${workspaceFolder}/cmd/cache-node",
+        "env": {
+          "PORT": "8082",
+          "NODE_ID": "localhost:8082",
+          "NODES": "localhost:8081,localhost:8082"
+        }
+      }
+    ]
+  }
