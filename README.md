@@ -1,4 +1,4 @@
-![FluxCache Architecture](cache.png)
+![FluxCache Architecture](Cache.png)
 
 *Figure: FluxCache distributed cache architecture and request flow.*
 
