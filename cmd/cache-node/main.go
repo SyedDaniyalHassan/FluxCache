@@ -7,9 +7,18 @@ import (
 	"log"
 	"net/http"
 	"os"
-	"strconv"
+	"os/signal"
 	"sync"
 	"time"
+
+	"context"
+	"crypto/rand"
+	"crypto/rsa"
+	"crypto/tls"
+	"crypto/x509"
+	"crypto/x509/pkix"
+	"encoding/pem"
+	"math/big"
 
 	"github.com/SyedDaniyalHassan/fluxcache/pkg/cluster"
 	"github.com/SyedDaniyalHassan/fluxcache/pkg/monitoring"
@@ -247,6 +256,53 @@ func handleHeartbeat(w http.ResponseWriter, r *http.Request) {
 	w.Write([]byte("ALIVE"))
 }
 
+func generateSelfSignedCert(certFile, keyFile string) error {
+	// Only for development! For production, use real certs.
+	if _, err := os.Stat(certFile); err == nil {
+		if _, err := os.Stat(keyFile); err == nil {
+			return nil // Both exist
+		}
+	}
+	log.Println("Generating self-signed TLS certificate (development only)...")
+	// Use Go's standard library to generate a self-signed cert
+	cert, key, err := generateCert("localhost")
+	if err != nil {
+		return err
+	}
+	if err := os.WriteFile(certFile, cert, 0644); err != nil {
+		return err
+	}
+	if err := os.WriteFile(keyFile, key, 0600); err != nil {
+		return err
+	}
+	return nil
+}
+
+func generateCert(host string) ([]byte, []byte, error) {
+	priv, err := rsa.GenerateKey(rand.Reader, 2048)
+	if err != nil {
+		return nil, nil, err
+	}
+	now := time.Now()
+	tmpl := x509.Certificate{
+		SerialNumber:          big.NewInt(now.UnixNano()),
+		Subject:               pkix.Name{CommonName: host},
+		NotBefore:             now.Add(-time.Hour),
+		NotAfter:              now.Add(365 * 24 * time.Hour),
+		KeyUsage:              x509.KeyUsageKeyEncipherment | x509.KeyUsageDigitalSignature,
+		ExtKeyUsage:           []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth},
+		BasicConstraintsValid: true,
+		DNSNames:              []string{host},
+	}
+	certDER, err := x509.CreateCertificate(rand.Reader, &tmpl, &tmpl, &priv.PublicKey, priv)
+	if err != nil {
+		return nil, nil, err
+	}
+	certPEM := pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: certDER})
+	keyPEM := pem.EncodeToMemory(&pem.Block{Type: "RSA PRIVATE KEY", Bytes: x509.MarshalPKCS1PrivateKey(priv)})
+	return certPEM, keyPEM, nil
+}
+
 func main() {
 	port := os.Getenv("PORT")
 	if port == "" {
@@ -276,16 +332,40 @@ func main() {
 	http.HandleFunc("/nodes", handleNodes)
 	http.HandleFunc("/health", handleHealth)
 	http.HandleFunc("/heartbeat", handleHeartbeat)
-	log.Printf("[FluxCache] Cache node %s running on :%s, cluster: %v", selfID, port, nodeAddrs)
 
-	replicaEnv := os.Getenv("REPLICA_COUNT")
-	if replicaEnv != "" {
-		if rc, err := strconv.Atoi(replicaEnv); err == nil && rc > 0 {
-			replicaCount = rc
-		}
+	certFile := "server.crt"
+	keyFile := "server.key"
+	if err := generateSelfSignedCert(certFile, keyFile); err != nil {
+		log.Fatalf("failed to generate self-signed cert: %v", err)
 	}
 
-	if err := http.ListenAndServe(":"+port, nil); err != nil {
+	server := &http.Server{
+		Addr:    ":" + port,
+		Handler: nil, // use default
+		TLSConfig: &tls.Config{
+			MinVersion: tls.VersionTLS12,
+			NextProtos: []string{"h2", "http/1.1"},
+		},
+		ReadTimeout:  10 * time.Second,
+		WriteTimeout: 10 * time.Second,
+		IdleTimeout:  60 * time.Second,
+	}
+
+	// Graceful shutdown
+	stop := make(chan os.Signal, 1)
+	signal.Notify(stop, os.Interrupt)
+	go func() {
+		<-stop
+		log.Println("Shutting down server...")
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		if err := server.Shutdown(ctx); err != nil {
+			log.Fatalf("server shutdown failed: %v", err)
+		}
+	}()
+
+	log.Printf("[FluxCache] Cache node %s running on https://localhost:%s (HTTP/2 enabled), cluster: %v", selfID, port, nodeAddrs)
+	if err := server.ListenAndServeTLS(certFile, keyFile); err != nil && err != http.ErrServerClosed {
 		log.Fatalf("server error: %v", err)
 	}
 }
